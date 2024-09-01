@@ -1,9 +1,11 @@
 extern crate num_bigint;
 extern crate num_traits;
 
-use num_bigint::BigInt;
+use num_bigint::{BigInt, RandBigInt};
 use num_traits::{One, Zero};
-use std::ops::{Rem};
+use core::num;
+use std::{arch::aarch64::int8x16_t, ops::Rem, vec};
+use rand::Rng;
 
 #[derive(Debug, Clone)]
 struct Polynomial {
@@ -26,9 +28,12 @@ impl PartialEq for Polynomial {
 }
 
 impl Polynomial {
+  
     fn new(coeffs: Vec<BigInt>) -> Self {
         Polynomial { coeffs }
     }
+
+
 
     fn degree(&self) -> usize {
         if self.coeffs.is_empty(){
@@ -94,16 +99,44 @@ impl Polynomial {
         pub fn is_zero(&self) -> bool {
             self.coeffs.iter().all(|c| c.is_zero())
         }
-    
-
-        
 
     
-   
+        fn mul_ring(&self, other: &Polynomial, modulus: &BigInt, irreducible: &Polynomial) -> Polynomial {
+            let mut result_coeffs = vec![BigInt::zero(); self.degree() + other.degree() + 1];
     
-    
+            for i in 0..=self.degree() {
+                for j in 0..=other.degree() {
+                    let mut result = result_coeffs[i + j].clone(); // Clone the current value
+                    result += &self.coeffs[i] * &other.coeffs[j];
+                    result_coeffs[i + j] = result.rem(modulus).clone(); // Apply the modulus and store back
+                }
+            }
+            let poly_result = Polynomial::new(result_coeffs);
+            let (_,result_coeffs_ring) =  polynomial_long_division(&poly_result, irreducible, modulus);
+            return Polynomial::new(result_coeffs_ring.coeffs);
+        }
 
-    
+
+
+        fn power_in_ring(&self, exponent:usize,  modulus: &BigInt, irreducible: &Polynomial)-> Polynomial{
+            if exponent == 0 {
+                return Polynomial::new(vec![BigInt::from(1)]);
+            }
+            let mut res_power = self.clone();
+                for _ in 1..exponent{
+                    res_power = res_power.mul_ring(&self, modulus, irreducible);
+            }
+            res_power
+        }
+
+
+
+
+}
+
+
+fn zero()-> Polynomial{
+    Polynomial::new(vec![BigInt::from(0)])
 }
 
 fn polynomial_long_division(dividend: &Polynomial, divisor: &Polynomial, modulus: &BigInt) -> (Polynomial, Polynomial) {
@@ -234,9 +267,91 @@ fn find_inverse_in_galois_ring(elem: &Polynomial, modulus: &BigInt, irreducible:
     Some(u)
 }
 
+fn generate_exceptional_set(irreducible: &Polynomial) -> Vec<Polynomial> {
+    let mut exceptional_set = Vec::new();
+    let two = BigInt::from(2);
+
+    // Loop over all possible polynomials of degree less than d
+    let max_value = 2_u64.pow(irreducible.degree() as u32);
+    for i in 0..max_value {
+        let mut coeffs = Vec::new();
+        let mut value = i;
+
+        // Convert integer i to a polynomial by interpreting the bits as coefficients
+        for _ in 0..irreducible.degree() {
+            coeffs.push(BigInt::from(value % 2));
+            value /= 2;
+        }
+
+        let candidate_poly = Polynomial::new(coeffs.clone());
+
+        exceptional_set.push(Polynomial::new(coeffs));
+        
+    }
+
+    exceptional_set
+}
+
+fn random_ring_element(modulus: &BigInt, irreducible: &Polynomial)->Polynomial{
+    let d = irreducible.degree();
+    let coeffs: Vec<BigInt> = (0..d).map(|_| rand::thread_rng().gen_bigint_range(&BigInt::from(0),&BigInt::from(modulus.clone()))).collect();
+    Polynomial{coeffs}
+}
+
+ 
+fn generate_random_polynomial_with_secret(secret: Polynomial, modulus: &BigInt, irreducible: &Polynomial)->Vec<Polynomial>{
+    let mut rand_poly: Vec<Polynomial> = vec![Polynomial::new(secret.coeffs)];
+    for _ in 0..irreducible.degree()-1{
+        rand_poly.push(random_ring_element(modulus, irreducible));
+    }
+    rand_poly
+}
+
+
+fn evaluate_polynomial(point: &Polynomial, rand_polynomial_ring: Vec<Polynomial>, modulus: &BigInt, irreducible: &Polynomial)-> Polynomial{
+    let mut eval_poly = Polynomial::new(vec![BigInt::from(0)]);
+    for i in 0..irreducible.degree(){
+        eval_poly = eval_poly.add(&rand_polynomial_ring[i].mul_ring(&point.power_in_ring(i, modulus, irreducible), modulus, irreducible),modulus);
+    }
+    eval_poly
+}
+
+
+fn shamir_secret_sharing(secret: Polynomial,  number_of_parties: usize, modulus: &BigInt, irreducible: &Polynomial) -> Vec<(Polynomial,Polynomial)>{
+    assert!(number_of_parties<=irreducible.degree());
+    let random_polynomial_ring =  generate_random_polynomial_with_secret(secret, modulus, irreducible);
+    let mut shares: Vec<(Polynomial,Polynomial)> = vec![];
+    let mut evaluated_element: Polynomial;
+    let points = generate_exceptional_set(irreducible);
+    for i in 0..number_of_parties{
+        evaluated_element = evaluate_polynomial(&points[i], random_polynomial_ring.clone(), modulus, irreducible);
+        shares.push((points[i].clone(),evaluated_element));
+    }
+    shares
+}
+
+fn reconstruct_secret(shares: Vec<(Polynomial,Polynomial)>, modulus: &BigInt, irreducible: &Polynomial) -> Polynomial{
+    let num_of_shares = shares.len();
+    let mut res = zero();
+    for  (xi, yi) in shares{
+    let mut li = Polynomial::new(vec![BigInt::from(1)]);
+        for (xj, _) in shares.clone(){
+            if xi != xj {
+                let numerator =   xj;
+                let denominator = &xj.sub_mod(&xi, modulus);
+                let denominator_inv = find_inverse_in_galois_ring(denominator,modulus,irreducible);
+                let frac = numerator.mul_ring(&denominator_inv.unwrap(), modulus, irreducible);
+                li  = li.mul_ring(&frac, modulus, irreducible);
+            }
+
+        res = res.add(&yi.mul_ring(&li, modulus, &irreducible),modulus);
+        }
+    res
+}
+
 
 fn main() {
-    let modulus = BigInt::from(8);
+    let modulus = BigInt::from(7);
 
     // Define the irreducible polynomial r(x) = x^4 + x + 1
     let irreducible = Polynomial::new(vec![
@@ -260,6 +375,31 @@ fn main() {
    println!("r: {:?}, t: {:?}, s:{:?}",r,s,t);
    let result = find_inverse_in_galois_ring(&divisor, &modulus, &irreducible);
    println!("{:?}", result);
+   let exeptional_set = generate_exceptional_set(&irreducible);
+   println!("Exceptional set: {:?}", exeptional_set);
+   let secret = random_ring_element(&modulus, &irreducible);
+   println!("secret: {:?}", secret);
+    println!("random polynomial ring (i.e., a list of polynomials): {:?}", generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible));
+         // Example polynomials: x^3 + 2x^2 + 3x + 4 and x^2 + 1
+         let a = Polynomial::new(vec![
+            BigInt::from(1), // Coefficient for x^0
+            BigInt::from(4), // Coefficient for x^1
+            BigInt::from(2), // Coefficient for x^2
+            BigInt::from(5), // Coefficienor x^3
+
+        ]);
+        let b = Polynomial::new(vec![
+            BigInt::from(6), // Coefficient for x^0
+            BigInt::from(3),  // Coefficient for x^1
+            BigInt::from(5), // Coefficient for x^2
+            BigInt::from(2), // Coefficient for x^3
+        ]);
+        println!("mul ring: a: {:?}, b:{:?}, a*b = {:?}", a,b, a.mul_ring(&b, &modulus, &irreducible) );
+        println!("a^3 = {:?}", a.power_in_ring(3, &modulus, &irreducible));
+        let rand_polynomial_ring = generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible);
+        let evaluated_poly = evaluate_polynomial(&zero(), rand_polynomial_ring.clone(), &modulus, &irreducible);
+        println!("evaluated polynnomial: {:?} at 0: {:?}, with secret {:?}, gives {:?}", rand_polynomial_ring, 0, secret, evaluated_poly );
+
 }
 
 
