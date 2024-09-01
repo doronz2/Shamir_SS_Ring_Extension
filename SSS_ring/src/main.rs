@@ -318,7 +318,7 @@ fn evaluate_polynomial(point: &Polynomial, rand_polynomial_ring: Vec<Polynomial>
 
 
 fn shamir_secret_sharing(secret: Polynomial,  number_of_parties: usize, modulus: &BigInt, irreducible: &Polynomial) -> Vec<(Polynomial,Polynomial)>{
-    assert!(number_of_parties<=irreducible.degree());
+    assert!(number_of_parties>=2^irreducible.degree()-1);
     let random_polynomial_ring =  generate_random_polynomial_with_secret(secret, modulus, irreducible);
     let mut shares: Vec<(Polynomial,Polynomial)> = vec![];
     let mut evaluated_element: Polynomial;
@@ -333,25 +333,26 @@ fn shamir_secret_sharing(secret: Polynomial,  number_of_parties: usize, modulus:
 fn reconstruct_secret(shares: Vec<(Polynomial,Polynomial)>, modulus: &BigInt, irreducible: &Polynomial) -> Polynomial{
     let num_of_shares = shares.len();
     let mut res = zero();
-    for  (xi, yi) in shares{
+    for  (xi, yi) in shares.clone(){
     let mut li = Polynomial::new(vec![BigInt::from(1)]);
         for (xj, _) in shares.clone(){
             if xi != xj {
-                let numerator =   xj;
+                let numerator =   xj.clone();
                 let denominator = &xj.sub_mod(&xi, modulus);
                 let denominator_inv = find_inverse_in_galois_ring(denominator,modulus,irreducible);
                 let frac = numerator.mul_ring(&denominator_inv.unwrap(), modulus, irreducible);
                 li  = li.mul_ring(&frac, modulus, irreducible);
             }
-
-        res = res.add(&yi.mul_ring(&li, modulus, &irreducible),modulus);
         }
-    res
+        res = res.add(&yi.mul_ring(&li, modulus, &irreducible),modulus);
+    }
+ res
 }
-
 
 fn main() {
     let modulus = BigInt::from(7);
+
+
 
     // Define the irreducible polynomial r(x) = x^4 + x + 1
     let irreducible = Polynomial::new(vec![
@@ -361,6 +362,8 @@ fn main() {
         BigInt::from(0), // Coefficient for x^3
         BigInt::from(1), // Coefficient for x^4
     ]);
+
+    let number_of_parties = 2^(irreducible.degree() - 1);
 
     // Define the polynomial to invert new_r(x) = x^2 + 1
     let divisor = Polynomial::new(vec![BigInt::from(1), BigInt::from(0), BigInt::from(1)]);
@@ -399,6 +402,10 @@ fn main() {
         let rand_polynomial_ring = generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible);
         let evaluated_poly = evaluate_polynomial(&zero(), rand_polynomial_ring.clone(), &modulus, &irreducible);
         println!("evaluated polynnomial: {:?} at 0: {:?}, with secret {:?}, gives {:?}", rand_polynomial_ring, 0, secret, evaluated_poly );
+        let shares = shamir_secret_sharing(secret.clone(), number_of_parties, &modulus, &irreducible);
+        println!("shares: {:?}",shares);
+        let reconstructed_secret = reconstruct_secret(shares, &modulus, &irreducible);
+        println!("original secret: {:?}. Reconstrcuted secret: {:?}", secret,reconstructed_secret);
 
 }
 
