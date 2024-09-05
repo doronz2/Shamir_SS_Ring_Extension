@@ -48,51 +48,14 @@ impl Polynomial {
         }
     }
 
-    fn add(&self, other: &Polynomial, modulus: &BigInt) -> Polynomial {
-        let mut result = vec![BigInt::zero(); self.coeffs.len().max(other.coeffs.len())];
-        let zero = BigInt::zero(); // Avoid temporary value issues
-
-        for i in 0..result.len() {
-            let a = if i < self.coeffs.len() { &self.coeffs[i] } else { &zero };
-            let b = if i < other.coeffs.len() { &other.coeffs[i] } else { &zero };
-
-            result[i] = (a + b).rem(modulus).clone();
+    fn trimmed_poly(&self)->Polynomial {
+        let mut divisor_poly = Polynomial::new(self.coeffs.clone());
+        while let Some(true) = divisor_poly.coeffs.last().map(|x| x.is_zero()) {
+            divisor_poly.coeffs.pop();
         }
-
-        Polynomial::new(result)
+        return divisor_poly
     }
-
-    fn sub_mod(&self, other: &Polynomial, modulus: &BigInt) -> Polynomial {
-        let mut result = vec![BigInt::zero(); self.coeffs.len().max(other.coeffs.len())];
-        let zero = BigInt::zero(); // Avoid temporary value issues
-
-        for i in 0..result.len() {
-            let a = if i < self.coeffs.len() { &self.coeffs[i] } else { &zero };
-            let b = if i < other.coeffs.len() { &other.coeffs[i] } else { &zero };
-
-            result[i] = (a - b).rem(modulus).clone();
-            if result[i].sign() == num_bigint::Sign::Minus {
-                result[i] += modulus.clone();
-            }
-        }
-
-        Polynomial::new(result)
-    }
-
-
-    fn mul(&self, other: &Polynomial, modulus: &BigInt) -> Polynomial {
-        let mut result_coeffs = vec![BigInt::zero(); self.degree() + other.degree() + 1];
-
-        for i in 0..=self.degree() {
-            for j in 0..=other.degree() {
-                let mut result = result_coeffs[i + j].clone(); // Clone the current value
-                result += &self.coeffs[i] * &other.coeffs[j];
-                result_coeffs[i + j] = result.rem(modulus).clone(); // Apply the modulus and store back
-            }
-        }
-
-        Polynomial::new(result_coeffs)
-    }
+    
 
 
         /// Check if a polynomial is zero.
@@ -100,31 +63,117 @@ impl Polynomial {
             self.coeffs.iter().all(|c| c.is_zero())
         }
 
+}
+
+#[derive(Debug, Clone)]
+struct GaloisRing {
+            modulus: BigInt,
+            irreducible: Polynomial
+}
+        
+
+impl GaloisRing{
+
+
     
-        fn mul_ring(&self, other: &Polynomial, modulus: &BigInt, irreducible: &Polynomial) -> Polynomial {
-            let mut result_coeffs = vec![BigInt::zero(); self.degree() + other.degree() + 1];
+    fn new(modulus: BigInt, irreducible: Polynomial) -> Self {
+        GaloisRing {modulus, irreducible}
+    }
+
+    fn add(&self, poly1: &Polynomial, poly2: &Polynomial) -> Polynomial {
+        let mut result = vec![BigInt::zero(); poly1.coeffs.len().max(poly2.coeffs.len())];
+        let zero = BigInt::zero(); // Avoid temporary value issues
+
+        for i in 0..result.len() {
+            let a = if i < poly1.coeffs.len() { &poly1.coeffs[i] } else { &zero };
+            let b = if i < poly2.coeffs.len() { &poly2.coeffs[i] } else { &zero };
+
+            result[i] = (a + b).rem(&self.modulus).clone();
+        }
+
+        Polynomial::new(result)
+    }
+
+
+    fn add_ring(&self, poly1: &Polynomial, poly2: &Polynomial) -> Polynomial {
+        let mut result = vec![BigInt::zero(); poly1.coeffs.len().max(poly2.coeffs.len())];
+        let zero = BigInt::zero(); // Avoid temporary value issues
+
+        for i in 0..result.len() {
+            let a = if i < poly1.coeffs.len() { &poly1.coeffs[i] } else { &zero };
+            let b = if i < poly2.coeffs.len() { &poly2.coeffs[i] } else { &zero };
+
+            result[i] = (a + b).rem(&self.modulus).clone();
+        }
+
+        let poly_result = Polynomial::new(result);
+        let (_,result_coeffs_ring) = self.polynomial_long_division( &poly_result, &self.irreducible);
+
+        Polynomial::new(result_coeffs_ring.coeffs)
+    }
+
+    fn sub_mod(&self, poly1: &Polynomial, poly2: &Polynomial) -> Polynomial {
+        let mut result = vec![BigInt::zero(); poly1.coeffs.len().max(poly2.coeffs.len())];
+        let zero = BigInt::zero(); // Avoid temporary value issues
+
+        for i in 0..result.len() {
+            let a = if i < poly1.coeffs.len() { &poly1.coeffs[i] } else { &zero };
+            let b = if i < poly2.coeffs.len() { &poly2.coeffs[i] } else { &zero };
+
+            result[i] = (a - b).rem(&self.modulus).clone();
+            if result[i].sign() == num_bigint::Sign::Minus {
+                result[i] += self.modulus.clone();
+            }
+        }
+
+        Polynomial::new(result)
+    }
+
+
+    fn mul(&self, poly1: &Polynomial, poly2: &Polynomial) -> Polynomial {
+        let mut result_coeffs = vec![BigInt::zero(); poly1.degree() + poly2.degree() + 1];
+
+        for i in 0..=poly1.degree() {
+            for j in 0..=poly2.degree() {
+                let mut result = result_coeffs[i + j].clone(); // Clone the current value
+                result += &poly1.coeffs[i] * &poly2.coeffs[j];
+                result_coeffs[i + j] = result.rem(&self.modulus).clone(); // Apply the modulus and store back
+            }
+        }
+
+        Polynomial::new(result_coeffs)
+    }
     
-            for i in 0..=self.degree() {
-                for j in 0..=other.degree() {
+        fn mul_ring(&self, poly1:  &Polynomial, poly2: &Polynomial) -> Polynomial {
+            let mut result_coeffs = vec![BigInt::zero(); poly1.degree() + poly2.degree() + 1];
+    
+            for i in 0..=poly1.degree() {
+                for j in 0..=poly2.degree() {
                     let mut result = result_coeffs[i + j].clone(); // Clone the current value
-                    result += &self.coeffs[i] * &other.coeffs[j];
-                    result_coeffs[i + j] = result.rem(modulus).clone(); // Apply the modulus and store back
+                    result += &poly1.coeffs[i] * &poly2.coeffs[j];
+                    result_coeffs[i + j] = result.rem(&self.modulus).clone(); // Apply the modulus and store back
                 }
             }
             let poly_result = Polynomial::new(result_coeffs);
-            let (_,result_coeffs_ring) =  polynomial_long_division(&poly_result, irreducible, modulus);
+            let (_,result_coeffs_ring) = self.polynomial_long_division( &poly_result, &self.irreducible);
             return Polynomial::new(result_coeffs_ring.coeffs);
         }
 
+    
 
-
-        fn power_in_ring(&self, exponent:usize,  modulus: &BigInt, irreducible: &Polynomial)-> Polynomial{
+        fn power_in_ring(&self, poly:  &Polynomial, exponent:usize)-> Polynomial{
             if exponent == 0 {
                 return Polynomial::new(vec![BigInt::from(1)]);
             }
-            let mut res_power = self.clone();
+
+            if (poly.is_zero()){
+                return GaloisRing::zero();
+            }
+            
+            
+            let mut res_power = poly.clone();
                 for _ in 1..exponent{
-                    res_power = res_power.mul_ring(&self, modulus, irreducible);
+                    res_power = self.mul_ring(&res_power, &poly);
             }
             res_power
         }
@@ -132,66 +181,73 @@ impl Polynomial {
 
 
 
-}
+
+
 
 
 fn zero()-> Polynomial{
     Polynomial::new(vec![BigInt::from(0)])
 }
 
-fn polynomial_long_division(dividend: &Polynomial, divisor: &Polynomial, modulus: &BigInt) -> (Polynomial, Polynomial) {
-    println!("dividend: {:?}, divisor: {:?}", dividend.coeffs, divisor.coeffs);
+fn polynomial_long_division(&self, dividend: &Polynomial, divisor: &Polynomial) -> (Polynomial, Polynomial) {
+   // println!("dividend: {:?}, divisor: {:?}", dividend.coeffs, divisor.coeffs);
 
     // Ensure that the division is only attempted if the dividend's degree is >= divisor's degree
-    if dividend.degree() < divisor.degree() {
+    
+    let divisor_trimmed= divisor.trimmed_poly(); //in case the leasing coeeficient/s is 0
+   // println!("divisor {:?}, divisor trimmed {:?}", divisor.coeffs, divisor_trimmed.coeffs);
+
+
+    if dividend.degree() < divisor_trimmed.degree() {
         return (Polynomial::new(vec![BigInt::zero()]), dividend.clone());
     }
 
-    let mut quotient = Polynomial::new(vec![BigInt::zero(); dividend.degree() - divisor.degree() + 1]);
+
+    let mut quotient = Polynomial::new(vec![BigInt::zero(); dividend.degree() - divisor_trimmed.degree() + 1]);
     let mut remainder = dividend.clone();
     let mut i = 0;
 
-    while remainder.degree() >= divisor.degree() && !remainder.is_zero() && i <= 5  {
-        let degree_diff = remainder.degree() - divisor.degree();
+    while remainder.degree() >= divisor_trimmed.degree() && !remainder.is_zero() && i <= 5  {
+        let degree_diff = remainder.degree() - divisor_trimmed.degree();
 
         // Leading coefficients
         let leading_coeff_remainder = remainder.coeffs.last().unwrap().clone();
-        let leading_coeff_divisor = divisor.coeffs.last().unwrap().clone();
+        let leading_coeff_divisor = divisor_trimmed.coeffs.last().unwrap().clone();
 
         // Compute the quotient coefficient: leading_coeff_remainder / leading_coeff_divisor (mod modulus)
         //let quotient_coeff = (leading_coeff_remainder.clone() * divisor.mod_inverse(modulus).unwrap()).rem(modulus);
-
-        let quotient_coeff = (leading_coeff_remainder.clone() * mod_inverse(leading_coeff_divisor,modulus).unwrap()).rem(modulus);
+       // println!("divisor: {:?}, leading coefficient divisor: {:?}", divisor, leading_coeff_divisor);
+        let quotient_coeff = (leading_coeff_remainder.clone() * self.mod_inverse(leading_coeff_divisor).unwrap()).rem(&self.modulus);
 
         // Construct the quotient term (align the degree with degree_diff)
         let mut quotient_term_coeffs = vec![BigInt::zero(); degree_diff + 1];
         quotient_term_coeffs[degree_diff] = quotient_coeff.clone();
         let quotient_term = Polynomial::new(quotient_term_coeffs);
 
-        println!("remainder: {:?}, Leading coeff remainder: {:?}, Leading coeff divisor: {:?}, Quotient coefficient: {:?}",
-                 remainder.coeffs, leading_coeff_remainder, divisor.coeffs.last().unwrap(), quotient_coeff);
+   //     println!("remainder: {:?}, Leading coeff remainder: {:?}, Leading coeff divisor: {:?}, Quotient coefficient: {:?}",
+      //           remainder.coeffs, leading_coeff_remainder, divisor.coeffs.last().unwrap(), quotient_coeff);
 
         // Update quotient
-        quotient = quotient.add(&quotient_term, modulus);
+        quotient = self.add(&quotient,&quotient_term);
 
         // Subtract the product of quotient term and divisor from remainder
-        let subtrahend = divisor.mul(&quotient_term, modulus);
-        remainder = remainder.sub_mod(&subtrahend, modulus);
+        let subtrahend = self.mul(&divisor,&quotient_term);
+        remainder = self.sub_mod(&remainder,&subtrahend);
 
         remainder.trim();
 
-        println!("Updated remainder: {:?}", remainder.coeffs);
+//        println!("Updated remainder: {:?}", remainder.coeffs);
         i += 1;
     }
 
-    println!("Final quotient: {:?}", quotient.coeffs);
-    println!("Final remainder: {:?}", remainder.coeffs);
+ //   println!("Final quotient: {:?}", quotient.coeffs);
+ //   println!("Final remainder: {:?}", remainder.coeffs);
 
     (quotient, remainder)
 }
 
 /// Extended Euclidean algorithm to compute the GCD and coefficients
-fn extended_euclidean(a: &Polynomial, b: &Polynomial, modulus: &BigInt) -> (Polynomial, Polynomial, Polynomial) {
+fn extended_euclidean(&self, a: &Polynomial, b: &Polynomial) -> (Polynomial, Polynomial, Polynomial) {
     let mut s = Polynomial::new(vec![BigInt::zero()]);
     let mut old_s = Polynomial::new(vec![BigInt::one()]);
     let mut t = Polynomial::new(vec![BigInt::one()]);
@@ -200,64 +256,71 @@ fn extended_euclidean(a: &Polynomial, b: &Polynomial, modulus: &BigInt) -> (Poly
     let mut old_r = a.clone();
     let i = 0;
     let mut j = 0;
-    while !r.coeffs.is_empty() && r.coeffs[0] != BigInt::zero() && j<=10{
+   // println!("a");
+    while !r.coeffs.is_empty() {
+  //  println!("b");
     //    let quotient = old_r.clone().rem(&r);
-    println!("j:{:?}",j);
-    println!("r_i: {:?}, r_i+1: {:?}", old_r.coeffs,r.coeffs);
+   // println!("j:{:?}",j);
+   // println!("r_i: {:?}, r_i+1: {:?}", old_r.coeffs,r.coeffs);
 
-        let (quotient,remainder) = polynomial_long_division(&old_r,&r, modulus);
+        let (quotient,remainder) = self.polynomial_long_division(&old_r,&r);
+     //   println!("quotient: {:?}, remainder: {:?}", quotient, remainder);
+
 
         old_r = r;
         r = remainder;
-        println!("after update. r_i: {:?}, r_i+1: {:?}", old_r.coeffs,r.coeffs);
+      //  println!("after update. r_i: {:?}, r_i+1: {:?}", old_r.coeffs,r.coeffs);
 
-        let new_s = old_s.sub_mod(&quotient.mul(&s, modulus), modulus);
+        let new_s = self.sub_mod(&old_s,&self.mul(&quotient,&s));
         old_s = std::mem::replace(&mut s, new_s);
 
-        let new_t = old_t.sub_mod(&quotient.mul(&t, modulus), modulus);
+        let new_t = self.sub_mod(&old_t,&self.mul(&quotient,&t));
         old_t = std::mem::replace(&mut t, new_t);
-        j += 1;
-        println!("i:{:?}",i);
+
+     //   println!("i:{:?}",i);
     }
 
 
     (old_r, old_t, old_s)
 }
 
-fn mod_inverse(divisor: BigInt, modulus: &BigInt) -> Option<BigInt> {
+fn mod_inverse(&self, divisor: BigInt) -> Option<BigInt> {
     let mut t = BigInt::zero();
     let mut new_t = BigInt::one();
-    let mut r = modulus.clone();
-    let mut new_r = divisor.clone();
-
+    let mut r = self.modulus.clone(); // Owned BigInt
+    let mut new_r = divisor.clone();  // Owned BigInt
+  
     while !new_r.is_zero() {
-        let quotient = &r / &new_r;
-        let temp_t = t.clone();
-        t = new_t.clone();
+        let quotient = &r / &new_r; // Use references to avoid moving r and new_r
+
+        let temp_t = t.clone(); // Clone t to create a temporary BigInt
+        t = new_t.clone();      // Move new_t into t
         new_t = temp_t - &quotient * &new_t;
 
-        let temp_r = r.clone();
-        r = new_r.clone();
-        new_r = temp_r - &quotient * &new_r;
+        let temp_r = r.clone(); // Clone r to create a temporary BigInt
+        r = new_r.clone();      // Clone new_r to avoid moving it
+        new_r = temp_r - quotient * new_r; // Now this works because new_r is cloned
     }
 
     if r > BigInt::one() {
         None
     } else {
-        Some(t.rem(modulus) + modulus)
+        Some((t.rem(&self.modulus) + &self.modulus).rem(&self.modulus)) // Ensure result is positive and within modulus
     }
 }
 
  
 /// Find the inverse of a polynomial in the Galois ring (Z[X] / modulus)
-fn find_inverse_in_galois_ring(elem: &Polynomial, modulus: &BigInt, irreducible: &Polynomial) -> Option<Polynomial> {
-    let (g, u, _) = extended_euclidean(irreducible, elem, modulus);
+fn find_inverse_in_galois_ring(&self, elem: &Polynomial) -> Option<Polynomial> {
+//    println!("0");
 
+    let (g, u, _) = self.extended_euclidean(&self.irreducible, elem);
+  //  println!("1");
     // If g is not 1, divide u by g
     if g.coeffs != vec![BigInt::one()] {
-        let g_inv = mod_inverse(g.coeffs[0].clone(),modulus).unwrap(); 
-            println!("t = {:?}, g_inv: {:?}",u.coeffs, g_inv);
-            let inverse_coeffs: Vec<BigInt> = u.coeffs.iter().map(|coeff| (coeff *  &g_inv).rem(modulus)).collect();
+        let g_inv = self.mod_inverse(g.coeffs[0].clone()).unwrap(); 
+       //     println!("t = {:?}, g_inv: {:?}",u.coeffs, g_inv);
+            let inverse_coeffs: Vec<BigInt> = u.coeffs.iter().map(|coeff| (coeff *  &g_inv).rem(&self.modulus)).collect();
             let inverse_poly = Polynomial::new(inverse_coeffs);
             return Some(inverse_poly);
 
@@ -267,23 +330,21 @@ fn find_inverse_in_galois_ring(elem: &Polynomial, modulus: &BigInt, irreducible:
     Some(u)
 }
 
-fn generate_exceptional_set(irreducible: &Polynomial) -> Vec<Polynomial> {
-    let mut exceptional_set = Vec::new();
-    let two = BigInt::from(2);
 
-    // Loop over all possible polynomials of degree less than d
-    let max_value = 2_u64.pow(irreducible.degree() as u32);
-    for i in 0..max_value {
+fn generate_exceptional_set(&self) -> Vec<Polynomial> {
+    let mut exceptional_set = Vec::new();
+
+    // Loop over all non zero elements in F_2
+    let max_value = (1 << self.irreducible.degree());
+    for i in 1..max_value  {
         let mut coeffs = Vec::new();
         let mut value = i;
 
         // Convert integer i to a polynomial by interpreting the bits as coefficients
-        for _ in 0..irreducible.degree() {
+        for _ in 0..self.irreducible.degree() {
             coeffs.push(BigInt::from(value % 2));
             value /= 2;
         }
-
-        let candidate_poly = Polynomial::new(coeffs.clone());
 
         exceptional_set.push(Polynomial::new(coeffs));
         
@@ -292,119 +353,220 @@ fn generate_exceptional_set(irreducible: &Polynomial) -> Vec<Polynomial> {
     exceptional_set
 }
 
-fn random_ring_element(modulus: &BigInt, irreducible: &Polynomial)->Polynomial{
-    let d = irreducible.degree();
-    let coeffs: Vec<BigInt> = (0..d).map(|_| rand::thread_rng().gen_bigint_range(&BigInt::from(0),&BigInt::from(modulus.clone()))).collect();
+
+
+
+fn random_ring_element(&self)->Polynomial{
+    let d = self.irreducible.degree();
+    let coeffs: Vec<BigInt> = (0..d).map(|_| rand::thread_rng().gen_bigint_range(&BigInt::from(0),&BigInt::from(self.modulus.clone()))).collect();
     Polynomial{coeffs}
 }
 
  
-fn generate_random_polynomial_with_secret(secret: Polynomial, modulus: &BigInt, irreducible: &Polynomial)->Vec<Polynomial>{
+fn generate_random_polynomial_with_secret(&self,secret: Polynomial)->Vec<Polynomial>{
     let mut rand_poly: Vec<Polynomial> = vec![Polynomial::new(secret.coeffs)];
-    for _ in 0..irreducible.degree()-1{
-        rand_poly.push(random_ring_element(modulus, irreducible));
+    for _ in 1..self.irreducible.degree(){
+        rand_poly.push(self.random_ring_element());
     }
     rand_poly
 }
 
 
-fn evaluate_polynomial(point: &Polynomial, rand_polynomial_ring: Vec<Polynomial>, modulus: &BigInt, irreducible: &Polynomial)-> Polynomial{
+fn evaluate_polynomial(&self, point: &Polynomial, rand_polynomial_ring: &Vec<Polynomial>)-> Polynomial{
     let mut eval_poly = Polynomial::new(vec![BigInt::from(0)]);
-    for i in 0..irreducible.degree(){
-        eval_poly = eval_poly.add(&rand_polynomial_ring[i].mul_ring(&point.power_in_ring(i, modulus, irreducible), modulus, irreducible),modulus);
+    for i in 0..self.irreducible.degree(){
+        eval_poly = self.add_ring(&eval_poly,  &self.mul_ring(&rand_polynomial_ring[i],&self.power_in_ring(point,i)));
+      //  println!("------ term {:?}, current mul is {:?}, power of point {:?} is {:?}", i, self.mul_ring(&rand_polynomial_ring[i],&self.power_in_ring(point,i)), point, &self.power_in_ring(point,i));
     }
+ //   println!("------term of point {:?} is {:?}", point, eval_poly.clone());
+  
     eval_poly
 }
 
 
-fn shamir_secret_sharing(secret: Polynomial,  number_of_parties: usize, modulus: &BigInt, irreducible: &Polynomial) -> Vec<(Polynomial,Polynomial)>{
-    assert!(number_of_parties>=2^irreducible.degree()-1);
-    let random_polynomial_ring =  generate_random_polynomial_with_secret(secret, modulus, irreducible);
+fn shamir_secret_sharing(&self, secret: Polynomial,  number_of_parties: usize, t: usize) -> Vec<(Polynomial,Polynomial)>{
+    assert!(number_of_parties <= (1 << &self.irreducible.degree()) -1);// check that  n <= 2^d
+    assert!(number_of_parties <= (1 << &self.irreducible.degree()) -1);// check that  n <= 2^d
+
+    let random_polynomial_ring =  &self.generate_random_polynomial_with_secret(secret);
     let mut shares: Vec<(Polynomial,Polynomial)> = vec![];
     let mut evaluated_element: Polynomial;
-    let points = generate_exceptional_set(irreducible);
+    let points = self.generate_exceptional_set();
     for i in 0..number_of_parties{
-        evaluated_element = evaluate_polynomial(&points[i], random_polynomial_ring.clone(), modulus, irreducible);
+        evaluated_element = self.evaluate_polynomial(&points[i], &random_polynomial_ring.clone());
         shares.push((points[i].clone(),evaluated_element));
     }
+   // println!("random polynomial ring: {:?}", random_polynomial_ring);
+
     shares
 }
 
-fn reconstruct_secret(shares: Vec<(Polynomial,Polynomial)>, modulus: &BigInt, irreducible: &Polynomial) -> Polynomial{
-    let num_of_shares = shares.len();
-    let mut res = zero();
+
+
+fn shamir_secret_sharing_non_random(&self, poly_vec: Vec<Polynomial>,  number_of_parties: usize) -> Vec<(Polynomial,Polynomial)>{
+    assert!(number_of_parties <= (1 << &self.irreducible.degree()) -1);// check that  n <= 2^d
+    assret!(number_of_parties >= )
+    let mut shares: Vec<(Polynomial,Polynomial)> = vec![];
+    let mut evaluated_element: Polynomial;
+    let points = self.generate_exceptional_set();
+    for i in 0..number_of_parties{
+        evaluated_element = self.evaluate_polynomial(&points[i], &poly_vec.clone());
+        shares.push((points[i].clone(),evaluated_element));
+    }
+    println!("random polynomial ring: {:?}", poly_vec);
+
+    shares
+}
+
+fn reconstruct_secret(&self, shares: Vec<(Polynomial,Polynomial)>) -> Polynomial{
+    let mut res = GaloisRing::zero();
     for  (xi, yi) in shares.clone(){
     let mut li = Polynomial::new(vec![BigInt::from(1)]);
         for (xj, _) in shares.clone(){
             if xi != xj {
                 let numerator =   xj.clone();
-                let denominator = &xj.sub_mod(&xi, modulus);
-                let denominator_inv = find_inverse_in_galois_ring(denominator,modulus,irreducible);
-                let frac = numerator.mul_ring(&denominator_inv.unwrap(), modulus, irreducible);
-                li  = li.mul_ring(&frac, modulus, irreducible);
+                let denominator = self.sub_mod(&xj,&xi);
+                let denominator_inv = self.find_inverse_in_galois_ring(&denominator);
+                let frac = self.mul_ring(&numerator,&denominator_inv.clone().unwrap());
+               //`` println!("num: {:?}, denom {:?}, denom_inv {:?}, frac = {:?}", numerator.coeffs, denominator.coeffs, denominator_inv, frac.coeffs);
+                println!("li {:?}, frac = {:?}", li.coeffs, frac.coeffs);
+
+                li  = self.mul_ring(&li,&frac);
             }
         }
-        res = res.add(&yi.mul_ring(&li, modulus, &irreducible),modulus);
+        res = self.add_ring(&res,&self.mul(&yi,&li));
+        println!("partial sum: {:?}, yi:{:?}, li:{:?}", res, yi,li);
     }
  res
 }
 
+
+}
+
+fn irreducible_polynomial(degree: usize) -> Option<Polynomial> {
+    match degree {
+        1 => {
+            // Define the irreducible polynomial r(x) = x + 1
+            Some(Polynomial::new(vec![
+                BigInt::from(1), // Coefficient for x^0
+                BigInt::from(1), // Coefficient for x^1
+            ]))
+        }
+        2 => {
+            // Define the irreducible polynomial r(x) = x^2 + x + 1
+            Some(Polynomial::new(vec![
+                BigInt::from(1), // Coefficient for x^0
+                BigInt::from(1), // Coefficient for x^1
+                BigInt::from(1), // Coefficient for x^2
+            ]))
+        }
+        3 => {
+            // Define the irreducible polynomial r(x) = x^3 + x + 1
+            Some(Polynomial::new(vec![
+                BigInt::from(1), // Coefficient for x^0
+                BigInt::from(1), // Coefficient for x^1
+                BigInt::from(0), // Coefficient for x^2
+                BigInt::from(1), // Coefficient for x^3
+            ]))
+        }
+        4 => {
+            // Define the irreducible polynomial r(x) = x^4 + x + 1
+            Some(Polynomial::new(vec![
+                BigInt::from(1), // Coefficient for x^0
+                BigInt::from(1), // Coefficient for x^1
+                BigInt::from(0), // Coefficient for x^2
+                BigInt::from(0), // Coefficient for x^3
+                BigInt::from(1), // Coefficient for x^4
+            ]))
+        }
+        5 => {
+            // Define the irreducible polynomial r(x) = x^5 + x^2 + 1
+            Some(Polynomial::new(vec![
+                BigInt::from(1), // Coefficient for x^0
+                BigInt::from(0), // Coefficient for x^1
+                BigInt::from(1), // Coefficient for x^2
+                BigInt::from(0), // Coefficient for x^3
+                BigInt::from(0), // Coefficient for x^4
+                BigInt::from(1), // Coefficient for x^5
+            ]))
+        }
+        _ => None, // Return None for any other degree
+    }
+}
+
+
 fn main() {
     let modulus = BigInt::from(7);
 
+    let degree = 3;
+    let number_of_parties = 3;
+    //let number_of_parties = 2^(irreducible.degree() - 1);
+ 
+    let irreducible = irreducible_polynomial(degree).unwrap();
+    let ring = GaloisRing::new(modulus, irreducible);
+    let secret = Polynomial::new(vec![
+        BigInt::from(6), // Coefficient for x^0
+        BigInt::from(4), // Coefficient for x^1
+       ]);
 
+    let a1 = Polynomial::new(vec![
+        BigInt::from(5), // Coefficient for x^0
+        BigInt::from(6), // Coefficient for x^1
+       ]);
 
-    // Define the irreducible polynomial r(x) = x^4 + x + 1
-    let irreducible = Polynomial::new(vec![
-        BigInt::from(1), // Coefficient for x^0
-        BigInt::from(1), // Coefficient for x^1
-        BigInt::from(0), // Coefficient for x^2
-        BigInt::from(0), // Coefficient for x^3
-        BigInt::from(1), // Coefficient for x^4
-    ]);
+       let a2 = Polynomial::new(vec![
+        BigInt::from(0), // Coefficient for x^0
+        BigInt::from(5), // Coefficient for x^1
+       ]);
+    
+       let mut non_rand_poly: Vec<Polynomial> = vec![secret.clone()];
+       non_rand_poly.push(a1);
+       non_rand_poly.push(a2);
 
-    let number_of_parties = 2^(irreducible.degree() - 1);
+       println!("NON random polynomial ring: {:?}", non_rand_poly);
+
+    
+       let shares = ring.shamir_secret_sharing_non_random(non_rand_poly, number_of_parties);
+       println!("shares: {:?}",shares);
 
     // Define the polynomial to invert new_r(x) = x^2 + 1
-    let divisor = Polynomial::new(vec![BigInt::from(1), BigInt::from(0), BigInt::from(1)]);
-    let (remainder,quotient) = polynomial_long_division(&irreducible, &divisor, &modulus);
+ //   let divisor = Polynomial::new(vec![BigInt::from(1), BigInt::from(0), BigInt::from(1)]);
+    //let (remainder,quotient) = ring.polynomial_long_division(&ring.irreducible, &divisor);
     /* 
     match find_inverse_in_galois_ring(&elem, &modulus, &irreducible) {
         Some(inverse) => println!("Inverse in Galois Ring: {:?}", inverse),
         None => println!("No inverse exists."),
     }
     */
-   let (r,s,t) = extended_euclidean(&irreducible, &divisor, &modulus);
-   println!("r: {:?}, t: {:?}, s:{:?}",r,s,t);
-   let result = find_inverse_in_galois_ring(&divisor, &modulus, &irreducible);
-   println!("{:?}", result);
-   let exeptional_set = generate_exceptional_set(&irreducible);
+   //let (r,s,t) = ring.extended_euclidean(&ring.irreducible, &divisor);
+//   println!("r: {:?}, t: {:?}, s:{:?}",r,s,t);
+ //  let result = ring.find_inverse_in_galois_ring(&divisor);
+ //  println!("{:?}", result);
+
+   let exeptional_set = ring.generate_exceptional_set();
    println!("Exceptional set: {:?}", exeptional_set);
-   let secret = random_ring_element(&modulus, &irreducible);
+   let secret = ring.random_ring_element();
    println!("secret: {:?}", secret);
-    println!("random polynomial ring (i.e., a list of polynomials): {:?}", generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible));
+    println!("random polynomial ring (i.e., a list of polynomials): {:?}", ring.generate_random_polynomial_with_secret(secret.clone()));
          // Example polynomials: x^3 + 2x^2 + 3x + 4 and x^2 + 1
          let a = Polynomial::new(vec![
-            BigInt::from(1), // Coefficient for x^0
-            BigInt::from(4), // Coefficient for x^1
-            BigInt::from(2), // Coefficient for x^2
-            BigInt::from(5), // Coefficienor x^3
-
-        ]);
+            BigInt::from(0), // Coefficient for x^0
+            BigInt::from(1), // Coefficient for x^1
+            ]);
         let b = Polynomial::new(vec![
             BigInt::from(6), // Coefficient for x^0
             BigInt::from(3),  // Coefficient for x^1
             BigInt::from(5), // Coefficient for x^2
             BigInt::from(2), // Coefficient for x^3
         ]);
-        println!("mul ring: a: {:?}, b:{:?}, a*b = {:?}", a,b, a.mul_ring(&b, &modulus, &irreducible) );
-        println!("a^3 = {:?}", a.power_in_ring(3, &modulus, &irreducible));
-        let rand_polynomial_ring = generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible);
-        let evaluated_poly = evaluate_polynomial(&zero(), rand_polynomial_ring.clone(), &modulus, &irreducible);
-        println!("evaluated polynnomial: {:?} at 0: {:?}, with secret {:?}, gives {:?}", rand_polynomial_ring, 0, secret, evaluated_poly );
-        let shares = shamir_secret_sharing(secret.clone(), number_of_parties, &modulus, &irreducible);
+      //  println!("mul ring: a: {:?}, b:{:?}, a*b = {:?}", a,b, a.mul_ring(&b, &modulus, &irreducible) );
+        println!("****** a^3 = {:?}", ring.power_in_ring(&a, 2));
+        //let rand_polynomial_ring = generate_random_polynomial_with_secret(secret.clone(), &modulus, &irreducible);
+        //let evaluated_poly = evaluate_polynomial(&zero(), rand_polynomial_ring.clone(), &modulus, &irreducible);
+        //println!("evaluated polynnomial: {:?} at 0: {:?}, with secret {:?}, gives {:?}", rand_polynomial_ring, 0, secret, evaluated_poly );
+        let shares = ring.shamir_secret_sharing(secret.clone(), number_of_parties);
         println!("shares: {:?}",shares);
-        let reconstructed_secret = reconstruct_secret(shares, &modulus, &irreducible);
+        let reconstructed_secret = ring.reconstruct_secret(shares);
         println!("original secret: {:?}. Reconstrcuted secret: {:?}", secret,reconstructed_secret);
 
 }
